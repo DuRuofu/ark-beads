@@ -207,6 +207,14 @@ pnpm build
 cd src-tauri && cargo test
 ```
 
+生成本机测试用的 macOS 应用：
+
+```bash
+pnpm build:mac
+```
+
+该命令会为应用附加固定的本地签名要求，避免每次重新构建后 macOS 将其识别成不同的“辅助功能”权限对象。正式分发版本仍应使用 Apple Developer ID 签名并公证。
+
 ---
 
 ## License
