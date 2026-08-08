@@ -58,7 +58,7 @@ async fn start_automation(
     request: ExecutionRequest,
 ) -> Result<ExecutionResult, String> {
     hide_window(&window)?;
-    let result = automation::execute(app, state, request).await;
+    let result = automation::execute(app, window.clone(), state, request).await;
     restore_window(&window, result)
 }
 

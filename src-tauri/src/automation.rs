@@ -8,7 +8,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 const GRID_SIZE: f64 = 23.0;
 const FAILSAFE_EDGE: i32 = 8;
@@ -159,6 +159,7 @@ pub async fn test_cell(
 
 pub async fn execute(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AutomationState>,
     request: ExecutionRequest,
 ) -> Result<ExecutionResult, String> {
@@ -169,10 +170,11 @@ pub async fn execute(
     state.stop_requested.store(false, Ordering::SeqCst);
 
     let shared_state = state.inner().clone();
-    let result =
-        tauri::async_runtime::spawn_blocking(move || run_execution(&app, &shared_state, request))
-            .await
-            .map_err(|error| format!("绘制任务异常结束：{error}"))?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        run_execution(&app, &window, &shared_state, request)
+    })
+    .await
+    .map_err(|error| format!("绘制任务异常结束：{error}"))?;
 
     state.running.store(false, Ordering::SeqCst);
     state.paused.store(false, Ordering::SeqCst);
@@ -202,6 +204,7 @@ pub fn status(state: State<'_, AutomationState>) -> AutomationStatus {
 
 fn run_execution(
     app: &AppHandle,
+    window: &WebviewWindow,
     state: &AutomationState,
     request: ExecutionRequest,
 ) -> Result<ExecutionResult, String> {
@@ -238,6 +241,8 @@ fn run_execution(
         }
 
         if group.palette_row > 5 && !lower_palette {
+            emit_progress(app, "palette", completed, total, "正在安全切换下半色盘");
+            reset_game_pointer_state(window, &mut enigo, delay)?;
             scroll_palette_bottom(&mut enigo, &request.calibration, delay)?;
             lower_palette = true;
         }
@@ -408,6 +413,25 @@ fn scroll_palette_bottom(
     Ok(())
 }
 
+fn reset_game_pointer_state(
+    window: &WebviewWindow,
+    enigo: &mut Enigo,
+    delay: u64,
+) -> Result<(), String> {
+    release_left_button(enigo)?;
+    window
+        .show()
+        .and_then(|_| window.set_focus())
+        .map_err(|error| format!("无法暂时恢复 Ark Beads 窗口：{error}"))?;
+    thread::sleep(Duration::from_millis(delay.saturating_mul(8).max(400)));
+    release_left_button(enigo)?;
+    window
+        .hide()
+        .map_err(|error| format!("无法重新隐藏 Ark Beads 窗口：{error}"))?;
+    thread::sleep(Duration::from_millis(delay.saturating_mul(8).max(400)));
+    Ok(())
+}
+
 fn draw_stroke(
     enigo: &mut Enigo,
     calibration: &Calibration,
@@ -445,10 +469,13 @@ fn click_point(enigo: &mut Enigo, point: ScreenPoint, delay: u64) -> Result<(), 
     move_to(enigo, point)?;
     thread::sleep(Duration::from_millis(delay));
     enigo
-        .button(Button::Left, Direction::Click)
+        .button(Button::Left, Direction::Press)
         .map_err(input_error)?;
+    thread::sleep(Duration::from_millis((delay / 2).max(20)));
+    let release_result = release_left_button(enigo);
     thread::sleep(Duration::from_millis(delay));
-    Ok(())
+    let safety_release_result = release_left_button(enigo);
+    release_result.and(safety_release_result)
 }
 
 fn drag_between(
@@ -457,6 +484,8 @@ fn drag_between(
     to: ScreenPoint,
     delay: u64,
 ) -> Result<(), String> {
+    release_left_button(enigo)?;
+    thread::sleep(Duration::from_millis(delay.saturating_mul(2)));
     move_to(enigo, from)?;
     enigo
         .button(Button::Left, Direction::Press)
