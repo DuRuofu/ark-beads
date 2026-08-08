@@ -80,6 +80,7 @@ button { color: inherit; }
 .panel::after { content: ""; position: absolute; width: 24px; height: 4px; top: -1px; right: 22px; background: var(--accent); box-shadow: 7px 4px 0 var(--magenta); }
 .preview-panel { display: flex; flex-direction: column; padding: 18px 20px 14px; min-height: 0; }
 .control-panel { display: flex; flex-direction: column; padding: 18px; min-height: 0; }
+.control-panel[data-current-step="calibrate"] { align-self: start; height: auto; min-height: 0; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
 .panel-heading.compact { margin-bottom: 11px; }
 .panel-heading h2 { margin: 4px 0 0; font-size: 17px; letter-spacing: .04em; }
@@ -133,13 +134,14 @@ button { color: inherit; }
 .button-row, .run-controls { display: grid; grid-template-columns: .65fr 1.35fr; gap: 8px; }
 .button-row .primary-button { width: 100%; }
 .instruction { margin: 0 0 10px; color: var(--muted); font-size: 10px; line-height: 1.55; }
-.calibration-list { flex: 1; min-height: 0; overflow-y: auto; }
-.calibration-item { display: grid; grid-template-columns: 33px 1fr auto; align-items: center; gap: 9px; min-height: 52px; padding: 6px 4px; border-bottom: 1px solid var(--line-soft); }
-.calibration-item > b { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid var(--line); color: var(--muted); font: 800 9px ui-monospace, monospace; }
+.calibration-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: none; min-height: 0; }
+.calibration-item { display: grid; grid-template-columns: 42px 1fr; grid-template-rows: 1fr auto; align-items: center; gap: 10px; min-height: 142px; padding: 15px; border: 1px solid var(--line); background: var(--surface-high); }
+.calibration-item > b { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid var(--line); color: var(--muted); font: 800 10px ui-monospace, monospace; }
 .calibration-item.is-set > b { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
 .calibration-item div { display: flex; flex-direction: column; gap: 3px; }
 .calibration-item strong { font-size: 10px; }
 .calibration-item span { color: var(--muted); font: 9px ui-monospace, monospace; }
+.calibration-item .capture-button { grid-column: 1 / -1; width: 100%; min-height: 42px; border-color: var(--accent); color: color-mix(in srgb, var(--accent), var(--ink) 35%); font-size: 11px; font-weight: 700; }
 
 .execution-summary { display: flex; flex-direction: column; gap: 5px; padding: 14px; margin-bottom: 13px; border: 1px solid var(--line); background: var(--surface-high); position: relative; overflow: hidden; }
 .execution-summary::after { content: ""; position: absolute; width: 55px; height: 55px; right: -18px; top: -15px; border: 8px solid color-mix(in srgb, var(--yellow), transparent 25%); transform: rotate(35deg); }

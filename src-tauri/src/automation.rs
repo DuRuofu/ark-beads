@@ -260,6 +260,16 @@ fn run_execution(
             }
         };
         draw_stroke(&mut enigo, &request.calibration, &stroke, delay)?;
+        click_point(
+            &mut enigo,
+            canvas_point(&request.calibration, &CellPoint { x: 0, y: row }),
+            delay,
+        )?;
+        click_point(
+            &mut enigo,
+            canvas_point(&request.calibration, &CellPoint { x: 23, y: row }),
+            delay,
+        )?;
         completed += 1;
         emit_progress(app, "prefill", completed, total, "正在铺设白色底层");
     }
@@ -395,6 +405,7 @@ fn select_palette(
     column: usize,
     delay: u64,
 ) -> Result<(), String> {
+    release_left_button(enigo)?;
     click_point(
         enigo,
         palette_point(calibration, row, column),
@@ -471,20 +482,22 @@ fn draw_stroke(
         .button(Button::Left, Direction::Press)
         .map_err(input_error)?;
     thread::sleep(Duration::from_millis(delay));
-    while x != end {
-        x += direction;
-        let cell = CellPoint {
-            x: x as usize,
-            y: stroke.from.y,
-        };
-        move_to(enigo, canvas_point(calibration, &cell))?;
+    let movement_result = (|| {
+        while x != end {
+            x += direction;
+            let cell = CellPoint {
+                x: x as usize,
+                y: stroke.from.y,
+            };
+            move_to(enigo, canvas_point(calibration, &cell))?;
+            thread::sleep(Duration::from_millis(delay));
+        }
         thread::sleep(Duration::from_millis(delay));
-    }
-    enigo
-        .button(Button::Left, Direction::Release)
-        .map_err(input_error)?;
-    thread::sleep(Duration::from_millis(delay));
-    Ok(())
+        Ok(())
+    })();
+    let release_result = release_left_button(enigo);
+    thread::sleep(Duration::from_millis(delay.saturating_mul(2)));
+    movement_result.and(release_result)
 }
 
 fn click_point(enigo: &mut Enigo, point: ScreenPoint, delay: u64) -> Result<(), String> {
@@ -508,17 +521,24 @@ fn drag_between(
         .button(Button::Left, Direction::Press)
         .map_err(input_error)?;
     thread::sleep(Duration::from_millis(delay));
-    for step in 1..=8 {
-        let x = from.x + (to.x - from.x) * step / 8;
-        let y = from.y + (to.y - from.y) * step / 8;
-        move_to(enigo, ScreenPoint { x, y })?;
-        thread::sleep(Duration::from_millis(delay));
-    }
+    let movement_result = (|| {
+        for step in 1..=8 {
+            let x = from.x + (to.x - from.x) * step / 8;
+            let y = from.y + (to.y - from.y) * step / 8;
+            move_to(enigo, ScreenPoint { x, y })?;
+            thread::sleep(Duration::from_millis(delay));
+        }
+        Ok(())
+    })();
+    let release_result = release_left_button(enigo);
+    thread::sleep(Duration::from_millis(delay.saturating_mul(2)));
+    movement_result.and(release_result)
+}
+
+fn release_left_button(enigo: &mut Enigo) -> Result<(), String> {
     enigo
         .button(Button::Left, Direction::Release)
-        .map_err(input_error)?;
-    thread::sleep(Duration::from_millis(delay.saturating_mul(2)));
-    Ok(())
+        .map_err(input_error)
 }
 
 fn move_to(enigo: &mut Enigo, point: ScreenPoint) -> Result<(), String> {

@@ -59,10 +59,10 @@ app.innerHTML = `
           </div>
           <input id="file-input" type="file" accept="application/json,.json" />
         </div>
-        <footer class="preview-footer"><span>白色与透明格保持空白</span><button id="choose-file" class="text-button" type="button">选择文件 ↗</button></footer>
+        <footer class="preview-footer"><span>正式绘制前统一铺设白色底层</span><button id="choose-file" class="text-button" type="button">选择文件 ↗</button></footer>
       </article>
 
-      <aside class="control-panel panel">
+      <aside id="control-panel" class="control-panel panel" data-current-step="import">
         <div id="message" class="message is-info">导入来自 prts.chongxi.us 的 24×24 模板。</div>
 
         <section class="step-view is-active" data-view="import">
@@ -138,9 +138,10 @@ function setMessage(text: string, kind: "info" | "success" | "error"): void {
 }
 
 function setStep(step: Step): void {
+  $("#control-panel").setAttribute("data-current-step", step);
   document.querySelectorAll<HTMLElement>("[data-step]").forEach((node) => node.classList.toggle("is-active", node.dataset.step === step));
   document.querySelectorAll<HTMLElement>("[data-view]").forEach((node) => node.classList.toggle("is-active", node.dataset.view === step));
-  if (step === "calibrate") setMessage("依次采集五个中心点；坐标仅保存在这台电脑。", "info");
+  if (step === "calibrate") setMessage("依次采集两个画布中心点；坐标仅保存在这台电脑。", "info");
   if (step === "execute") setMessage("先做单格试点。正式启动后有 4 秒切换回游戏窗口。", "info");
 }
 
@@ -340,7 +341,7 @@ for (const name of ["dragleave", "drop"]) dropZone.addEventListener(name, (event
 dropZone.addEventListener("drop", (event) => { const file = event.dataTransfer?.files[0]; if (file) void loadTemplate(file); });
 document.querySelectorAll<HTMLButtonElement>("[data-step]").forEach((button) => button.addEventListener("click", () => {
   const target = button.dataset.step as Step;
-  if (target === "import" || (target === "calibrate" && analysis) || (target === "execute" && analysis && calibrationReady())) setStep(target);
+  if (target === "import" || target === "calibrate" || (target === "execute" && analysis && calibrationReady())) setStep(target);
 }));
 primaryImport.addEventListener("click", () => setStep("calibrate"));
 $("#back-import").addEventListener("click", () => setStep("import"));
