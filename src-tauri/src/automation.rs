@@ -135,11 +135,13 @@ pub async fn test_cell(
     palette_column: usize,
     cell: CellPoint,
     delay_ms: u64,
+    countdown_ms: u64,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         validate_calibration(&calibration)?;
         validate_palette(palette_row, palette_column)?;
         validate_cell(&cell)?;
+        thread::sleep(Duration::from_millis(countdown_ms.clamp(1_000, 10_000)));
         let mut enigo = create_enigo(true)?;
         let delay = delay_ms.clamp(20, 1_000);
 

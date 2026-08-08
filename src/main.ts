@@ -193,12 +193,9 @@ function renderCalibration(): void {
 async function captureCalibration(button: HTMLButtonElement): Promise<void> {
   const key = button.dataset.key as CalibrationKey;
   document.querySelectorAll<HTMLButtonElement>(".capture-button").forEach((item) => { item.disabled = true; });
-  for (let count = 3; count > 0; count -= 1) {
-    setMessage(`${count} 秒后读取鼠标位置：请移到游戏目标中心…`, "info");
-    await new Promise((resolve) => window.setTimeout(resolve, 1000));
-  }
+  setMessage("窗口将隐藏，3 秒后读取鼠标位置。请移到游戏目标中心并保持不动…", "info");
   try {
-    calibration[key] = await invoke<ScreenPoint>("capture_pointer", { delayMs: 250 });
+    calibration[key] = await invoke<ScreenPoint>("capture_pointer", { delayMs: 3000 });
     calibration = derivePaletteCalibration(calibration);
     localStorage.setItem(CALIBRATION_KEY, JSON.stringify(calibration));
     renderCalibration();
@@ -276,10 +273,9 @@ async function testCell(): Promise<void> {
   const cell = group?.strokes[0]?.from;
   if (!group || !cell) return setMessage("模板中没有需要绘制的格子。", "error");
   testButton.disabled = true;
-  setMessage("3 秒后执行单格试点，请切换到游戏…", "info");
-  await new Promise((resolve) => window.setTimeout(resolve, 3000));
+  setMessage("窗口将隐藏，3 秒后执行单格试点。", "info");
   try {
-    await invoke("test_cell", { calibration: calibration as Calibration, paletteRow: group.paletteRow, paletteColumn: group.paletteColumn, cell, delayMs: Number(speed.value) });
+    await invoke("test_cell", { calibration: calibration as Calibration, paletteRow: group.paletteRow, paletteColumn: group.paletteColumn, cell, delayMs: Number(speed.value), countdownMs: 3000 });
     setMessage(`已试点画布第 ${cell.y + 1} 行第 ${cell.x + 1} 列。确认后请在游戏中撤销该格。`, "success");
   } catch (error) { setMessage(String(error), "error"); }
   finally { testButton.disabled = false; }
@@ -300,7 +296,7 @@ async function startAutomation(): Promise<void> {
   setRunning(true);
   paused = false;
   pauseButton.textContent = "暂停";
-  setMessage("倒计时开始，请立即切换到游戏窗口并勿触碰鼠标。", "info");
+  setMessage("窗口将隐藏；4 秒后开始绘制，结束或停止后自动恢复。", "info");
   try {
     const result = await invoke<ExecutionResult>("start_automation", {
       request: { calibration: calibration as Calibration, groups: analysis.groups, delayMs: Number(speed.value), countdownMs: 4000 },

@@ -18,28 +18,70 @@ fn check_input_access(prompt: bool) -> InputAccess {
 }
 
 #[tauri::command]
-async fn capture_pointer(delay_ms: u64) -> Result<ScreenPoint, String> {
-    automation::capture_pointer(delay_ms).await
+async fn capture_pointer(
+    window: tauri::WebviewWindow,
+    delay_ms: u64,
+) -> Result<ScreenPoint, String> {
+    hide_window(&window)?;
+    let result = automation::capture_pointer(delay_ms).await;
+    restore_window(&window, result)
 }
 
 #[tauri::command]
 async fn test_cell(
+    window: tauri::WebviewWindow,
     calibration: Calibration,
     palette_row: usize,
     palette_column: usize,
     cell: CellPoint,
     delay_ms: u64,
+    countdown_ms: u64,
 ) -> Result<(), String> {
-    automation::test_cell(calibration, palette_row, palette_column, cell, delay_ms).await
+    hide_window(&window)?;
+    let result = automation::test_cell(
+        calibration,
+        palette_row,
+        palette_column,
+        cell,
+        delay_ms,
+        countdown_ms,
+    )
+    .await;
+    restore_window(&window, result)
 }
 
 #[tauri::command]
 async fn start_automation(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, AutomationState>,
     request: ExecutionRequest,
 ) -> Result<ExecutionResult, String> {
-    automation::execute(app, state, request).await
+    hide_window(&window)?;
+    let result = automation::execute(app, state, request).await;
+    restore_window(&window, result)
+}
+
+fn hide_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window
+        .hide()
+        .map_err(|error| format!("无法暂时隐藏 Ark Beads：{error}"))
+}
+
+fn restore_window<T>(
+    window: &tauri::WebviewWindow,
+    result: Result<T, String>,
+) -> Result<T, String> {
+    let restore_result = window
+        .show()
+        .and_then(|_| window.set_focus())
+        .map_err(|error| format!("无法恢复 Ark Beads 窗口：{error}"));
+
+    match (result, restore_result) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
 }
 
 #[tauri::command]
