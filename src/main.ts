@@ -19,9 +19,6 @@ const THEME_KEY = "ark-beads.theme";
 const calibrationItems: Array<{ key: CalibrationKey; index: string; title: string; detail: string }> = [
   { key: "canvasTopLeft", index: "A1", title: "画布左上格中心", detail: "第 1 行第 1 列中心" },
   { key: "canvasBottomRight", index: "A2", title: "画布右下格中心", detail: "第 24 行第 24 列中心" },
-  { key: "paletteTopLeft", index: "P1", title: "色板第 1 行第 1 列", detail: "先将色板滚动到最顶端" },
-  { key: "paletteTopRow5Col4", index: "P2", title: "色板第 5 行第 4 列", detail: "用于计算行列间距" },
-  { key: "paletteBottomRow6Col1", index: "P3", title: "色板第 6 行第 1 列", detail: "将色板滚到底后采集" },
 ];
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -81,11 +78,11 @@ app.innerHTML = `
         </section>
 
         <section class="step-view" data-view="calibrate">
-          <div class="panel-heading compact"><div><p class="panel-index">POSITION REGISTER</p><h2>五点手动校准</h2></div><button id="permission-button" class="mini-button" type="button">检查权限</button></div>
-          <p class="instruction">点“采集”后，在 3 秒内把鼠标移到游戏中的目标中心并保持不动。游戏窗口位置改变后需重新校准。</p>
+          <div class="panel-heading compact"><div><p class="panel-index">POSITION REGISTER</p><h2>两点快速校准</h2></div><button id="permission-button" class="mini-button" type="button">检查权限</button></div>
+          <p class="instruction">只需采集画布两个对角格的中心。程序会按官方客户端的固定比例自动计算调色板；游戏窗口位置改变后再重新校准。</p>
           <div id="calibration-list" class="calibration-list"></div>
           <div class="safety-note"><b>FAILSAFE</b><span>绘制中将鼠标移至屏幕左上角即可紧急停止。</span></div>
-          <div class="button-row"><button id="back-import" class="secondary-button" type="button">返回</button><button id="to-execute" class="primary-button" type="button" disabled><span>校准完成</span><b>05 / 05</b></button></div>
+          <div class="button-row"><button id="back-import" class="secondary-button" type="button">返回</button><button id="to-execute" class="primary-button" type="button" disabled><span>校准完成</span><b>02 / 02</b></button></div>
         </section>
 
         <section class="step-view" data-view="execute">
@@ -121,7 +118,7 @@ const speed = $("#speed") as HTMLInputElement;
 const progress = $("#progress") as HTMLProgressElement;
 
 let analysis: TemplateAnalysis | null = null;
-let calibration: Partial<Calibration> = loadCalibration();
+let calibration: Partial<Calibration> = derivePaletteCalibration(loadCalibration());
 let running = false;
 let paused = false;
 
@@ -151,8 +148,37 @@ function loadCalibration(): Partial<Calibration> {
   try { return JSON.parse(localStorage.getItem(CALIBRATION_KEY) ?? "{}"); } catch { return {}; }
 }
 
+function derivePaletteCalibration(value: Partial<Calibration>): Partial<Calibration> {
+  const topLeft = value.canvasTopLeft;
+  const bottomRight = value.canvasBottomRight;
+  if (!topLeft || !bottomRight || bottomRight.x <= topLeft.x || bottomRight.y <= topLeft.y) return value;
+
+  const width = bottomRight.x - topLeft.x;
+  const height = bottomRight.y - topLeft.y;
+  const paletteTopLeft = {
+    x: Math.round(topLeft.x + width * 1.26738),
+    y: Math.round(topLeft.y + height * 0.28762),
+  };
+  const columnStep = width * 0.12923;
+  const rowStep = height * 0.12823;
+
+  return {
+    ...value,
+    paletteTopLeft,
+    paletteTopRow5Col4: {
+      x: Math.round(paletteTopLeft.x + columnStep * 3),
+      y: Math.round(paletteTopLeft.y + rowStep * 4),
+    },
+    paletteBottomRow6Col1: paletteTopLeft,
+  };
+}
+
 function calibrationReady(): boolean {
-  return calibrationItems.every(({ key }) => calibration[key] !== undefined);
+  return calibration.canvasTopLeft !== undefined
+    && calibration.canvasBottomRight !== undefined
+    && calibration.paletteTopLeft !== undefined
+    && calibration.paletteTopRow5Col4 !== undefined
+    && calibration.paletteBottomRow6Col1 !== undefined;
 }
 
 function renderCalibration(): void {
@@ -173,6 +199,7 @@ async function captureCalibration(button: HTMLButtonElement): Promise<void> {
   }
   try {
     calibration[key] = await invoke<ScreenPoint>("capture_pointer", { delayMs: 250 });
+    calibration = derivePaletteCalibration(calibration);
     localStorage.setItem(CALIBRATION_KEY, JSON.stringify(calibration));
     renderCalibration();
     setMessage("坐标已记录。继续采集下一点。", "success");
