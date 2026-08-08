@@ -33,13 +33,21 @@
 
 ```json
 {
-    "width": 24,
-    "height": 24,
-    "pixels": [
-        ...
+    "size": 24,
+    "cells": [
+        {
+            "x": 0,
+            "y": 0,
+            "seq": 1,
+            "region": 1,
+            "hex": "#FFFFFF",
+            "palPos": "第1行第4列"
+        }
     ]
 }
 ```
+
+当前兼容 [PRTS 像素画取色工具](https://prts.chongxi.us/) 导出的 JSON。白色和透明格会保持画布空白，不进入绘制任务。
 
 ---
 
@@ -113,7 +121,7 @@ JSON
 解析模板
     │
     ▼
-识别游戏界面（OpenCV）
+手动校准游戏界面
     │
     ▼
 计算画布坐标
@@ -128,7 +136,9 @@ JSON
 
 ### Phase 1
 
-- [ ] JSON 解析
+- [x] JSON 解析与严格校验
+- [x] 24×24 模板预览
+- [x] 官方 40 色映射与绘制任务规划
 - [ ] 固定坐标自动点击
 - [ ] 完成第一张拼豆
 
@@ -158,9 +168,30 @@ JSON
 
 - Rust
 - Tauri
-- OpenCV
+- 原生 TypeScript / CSS
 - Enigo（鼠标键盘自动化）
 - serde_json
+
+MVP 不依赖 OpenCV，先使用手动校准降低安装包体积。自动识别将在后续阶段按需加入。
+
+---
+
+## 本地开发
+
+需要安装 Node.js、Rust 和 macOS Command Line Tools。
+
+```bash
+npm install
+npm run tauri dev
+```
+
+运行检查：
+
+```bash
+npm run check
+npm run build
+cd src-tauri && cargo test
+```
 
 ---
 

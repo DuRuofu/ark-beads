@@ -1,0 +1,13 @@
+# Local game captures and experimental fixtures
+/research/game-ui/
+
+# macOS
+.DS_Store
+
+# Frontend dependencies and build output
+/node_modules/
+/dist/
+
+# Rust and Tauri build output
+/target/
+/src-tauri/target/
