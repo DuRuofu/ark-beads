@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { PRESET_TEMPLATES } from "./presets";
 import "./styles.css";
 import type {
   AutomationProgress,
@@ -16,6 +17,8 @@ type CalibrationKey = keyof Calibration;
 
 const CALIBRATION_KEY = "ark-beads.calibration.v1";
 const THEME_KEY = "ark-beads.theme";
+const LIBRARY_KEY = "ark-beads.template-library.v1";
+const MAX_SAVED_TEMPLATES = 8;
 const calibrationItems: Array<{ key: CalibrationKey; index: string; title: string; detail: string }> = [
   { key: "canvasTopLeft", index: "A1", title: "画布左上格中心", detail: "第 1 行第 1 列中心" },
   { key: "canvasBottomRight", index: "A2", title: "画布右下格中心", detail: "第 24 行第 24 列中心" },
@@ -67,6 +70,8 @@ app.innerHTML = `
 
         <section class="step-view is-active" data-view="import">
           <div class="panel-heading compact"><div><p class="panel-index">MISSION DATA</p><h2>绘制任务</h2></div></div>
+          <div class="section-label"><span>快速模板</span><i></i><button id="export-template" class="text-button" type="button" disabled>导出当前 JSON</button></div>
+          <div id="template-library" class="template-library"></div>
           <dl class="metrics">
             <div><dt>有效格子</dt><dd id="painted-count">—</dd></div><div><dt>使用颜色</dt><dd id="color-count">—</dd></div>
             <div><dt>预计操作</dt><dd id="stroke-count">—</dd></div><div><dt>连续拖动</dt><dd id="drag-count">—</dd></div>
@@ -118,7 +123,10 @@ const speed = $("#speed") as HTMLInputElement;
 const progress = $("#progress") as HTMLProgressElement;
 
 let analysis: TemplateAnalysis | null = null;
+let currentJson = "";
+let currentTemplateName = "";
 let calibration: Partial<Calibration> = derivePaletteCalibration(loadCalibration());
+let savedTemplates = loadSavedTemplates();
 let running = false;
 let paused = false;
 
@@ -147,6 +155,66 @@ function setStep(step: Step): void {
 
 function loadCalibration(): Partial<Calibration> {
   try { return JSON.parse(localStorage.getItem(CALIBRATION_KEY) ?? "{}"); } catch { return {}; }
+}
+
+interface SavedTemplate {
+  id: string;
+  name: string;
+  json: string;
+  updatedAt: number;
+}
+
+function loadSavedTemplates(): SavedTemplate[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(LIBRARY_KEY) ?? "[]");
+    return Array.isArray(value) ? value.slice(0, MAX_SAVED_TEMPLATES) : [];
+  } catch {
+    return [];
+  }
+}
+
+function templateFingerprint(json: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < json.length; index += 1) {
+    hash ^= json.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>'"]/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "'": "&#39;",
+    "\"": "&quot;",
+  })[character]!);
+}
+
+function rememberTemplate(name: string, json: string): void {
+  const id = templateFingerprint(json);
+  savedTemplates = [
+    { id, name: name.replace(/\.json$/i, ""), json, updatedAt: Date.now() },
+    ...savedTemplates.filter((item) => item.id !== id),
+  ].slice(0, MAX_SAVED_TEMPLATES);
+  localStorage.setItem(LIBRARY_KEY, JSON.stringify(savedTemplates));
+  renderTemplateLibrary();
+}
+
+function renderTemplateLibrary(): void {
+  const builtIns = PRESET_TEMPLATES.map((item) => `
+    <button class="template-card is-preset" data-preset="${item.id}" type="button">
+      <b>${escapeHtml(item.name)}</b><span>${escapeHtml(item.description)}</span><small>PRESET</small>
+    </button>
+  `).join("");
+  const saved = savedTemplates.map((item) => `
+    <div class="template-card saved-template">
+      <button data-saved="${item.id}" type="button"><b>${escapeHtml(item.name)}</b><span>本机保存的导入模板</span></button>
+      <button class="remove-template" data-remove="${item.id}" type="button" aria-label="删除 ${escapeHtml(item.name)}">×</button>
+    </div>
+  `).join("");
+  $("#template-library").innerHTML = builtIns + saved;
 }
 
 function derivePaletteCalibration(value: Partial<Calibration>): Partial<Calibration> {
@@ -236,8 +304,10 @@ function groupMarkup(group: ColorGroup): string {
   return `<div class="color-task"><i style="--swatch:${group.hex}"></i><div><b>色板 ${group.paletteRow}-${group.paletteColumn}</b><span>${group.cellCount} 格 · ${group.strokes.length} 次操作</span></div><code>${group.hex}</code></div>`;
 }
 
-function renderAnalysis(fileName: string, result: TemplateAnalysis): void {
+function renderAnalysis(fileName: string, json: string, result: TemplateAnalysis): void {
   analysis = result;
+  currentJson = json;
+  currentTemplateName = fileName.replace(/\.json$/i, "");
   emptyState.hidden = true;
   canvas.classList.add("is-visible");
   templateStatus.textContent = "校验通过";
@@ -250,6 +320,7 @@ function renderAnalysis(fileName: string, result: TemplateAnalysis): void {
   $("#execution-name").textContent = fileName;
   $("#execution-detail").textContent = `${result.size * result.size} 格 · ${result.colorCount + 1} 色 · ${result.strokeCount + result.size} 次操作`;
   primaryImport.disabled = false;
+  ($("#export-template") as HTMLButtonElement).disabled = false;
   primaryImport.querySelector("b")!.textContent = "READY";
   testButton.disabled = !calibrationReady();
   startButton.disabled = !calibrationReady();
@@ -260,8 +331,36 @@ function renderAnalysis(fileName: string, result: TemplateAnalysis): void {
 async function loadTemplate(file: File): Promise<void> {
   if (!file.name.toLowerCase().endsWith(".json")) return setMessage("请选择 JSON 模板文件。", "error");
   setMessage("正在校验模板并生成绘制任务…", "info");
-  try { renderAnalysis(file.name, await invoke<TemplateAnalysis>("analyze_template", { json: await file.text() })); }
+  try {
+    const json = await file.text();
+    const result = await invoke<TemplateAnalysis>("analyze_template", { json });
+    renderAnalysis(file.name, json, result);
+    rememberTemplate(file.name, json);
+  }
   catch (error) { templateStatus.textContent = "模板无效"; templateStatus.className = "status-chip is-error"; setMessage(String(error), "error"); }
+}
+
+async function loadLibraryTemplate(name: string, json: string): Promise<void> {
+  setMessage("正在载入模板库内容…", "info");
+  try {
+    const result = await invoke<TemplateAnalysis>("analyze_template", { json });
+    renderAnalysis(`${name}.json`, json, result);
+  } catch (error) {
+    setMessage(String(error), "error");
+  }
+}
+
+function exportCurrentTemplate(): void {
+  if (!currentJson) return;
+  const blob = new Blob([currentJson], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  const safeName = (currentTemplateName || "ark-beads-template").replace(/[\\/:*?"<>|]/g, "-");
+  anchor.download = `${safeName}.json`;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setMessage("当前模板已导出为 JSON 文件。", "success");
 }
 
 async function checkPermission(): Promise<void> {
@@ -334,6 +433,29 @@ if ("__TAURI_INTERNALS__" in window) {
 }
 
 $("#choose-file").addEventListener("click", () => fileInput.click());
+$("#export-template").addEventListener("click", exportCurrentTemplate);
+$("#template-library").addEventListener("click", (event) => {
+  const target = event.target as HTMLElement;
+  const removeButton = target.closest<HTMLElement>("[data-remove]");
+  if (removeButton?.dataset.remove) {
+    savedTemplates = savedTemplates.filter((item) => item.id !== removeButton.dataset.remove);
+    localStorage.setItem(LIBRARY_KEY, JSON.stringify(savedTemplates));
+    renderTemplateLibrary();
+    setMessage("已从本机模板库移除。", "info");
+    return;
+  }
+  const presetButton = target.closest<HTMLElement>("[data-preset]");
+  if (presetButton?.dataset.preset) {
+    const preset = PRESET_TEMPLATES.find((item) => item.id === presetButton.dataset.preset);
+    if (preset) void loadLibraryTemplate(preset.name, preset.json);
+    return;
+  }
+  const savedButton = target.closest<HTMLElement>("[data-saved]");
+  if (savedButton?.dataset.saved) {
+    const saved = savedTemplates.find((item) => item.id === savedButton.dataset.saved);
+    if (saved) void loadLibraryTemplate(saved.name, saved.json);
+  }
+});
 dropZone.addEventListener("click", (event) => { if (event.target !== canvas) fileInput.click(); });
 fileInput.addEventListener("change", () => { const file = fileInput.files?.[0]; if (file) void loadTemplate(file); });
 for (const name of ["dragenter", "dragover"]) dropZone.addEventListener(name, (event) => { event.preventDefault(); dropZone.classList.add("is-dragging"); });
@@ -355,3 +477,4 @@ stopButton.addEventListener("click", () => void stopAutomation());
 speed.addEventListener("input", () => { $("#speed-label").textContent = `${speed.value} ms`; });
 
 renderCalibration();
+renderTemplateLibrary();
