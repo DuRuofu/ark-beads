@@ -29,3 +29,34 @@ export interface TemplateAnalysis {
   preview: Array<string | null>;
   groups: ColorGroup[];
 }
+
+export interface ScreenPoint {
+  x: number;
+  y: number;
+}
+
+export interface Calibration {
+  canvasTopLeft: ScreenPoint;
+  canvasBottomRight: ScreenPoint;
+  paletteTopLeft: ScreenPoint;
+  paletteTopRow5Col4: ScreenPoint;
+  paletteBottomRow6Col1: ScreenPoint;
+}
+
+export interface InputAccess {
+  granted: boolean;
+  platform: string;
+  message: string;
+}
+
+export interface AutomationProgress {
+  phase: "countdown" | "drawing" | "stopped" | "completed";
+  completed: number;
+  total: number;
+  message: string;
+}
+
+export interface ExecutionResult {
+  completed: number;
+  stopped: boolean;
+}
