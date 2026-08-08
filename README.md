@@ -2,6 +2,8 @@
 
 一个用于《明日方舟》拼豆小游戏的离线桌面自动化工具。导入 24×24 模板、完成两点校准后，Ark Beads 会自动选择颜色并逐格绘制。
 
+项目灵感与初版模板格式来自[这位哔哩哔哩作者](https://space.bilibili.com/500042199)制作的 [PRTS 像素画取色工具](https://prts.chongxi.us/)，感谢作者提供实用的模板生成网站。
+
 ![Ark Beads 兔子模板预览](docs/assets/ark-beads-rabbit.png)
 
 ## 当前功能
