@@ -169,7 +169,10 @@ function derivePaletteCalibration(value: Partial<Calibration>): Partial<Calibrat
       x: Math.round(paletteTopLeft.x + columnStep * 3),
       y: Math.round(paletteTopLeft.y + rowStep * 4),
     },
-    paletteBottomRow6Col1: paletteTopLeft,
+    paletteBottomRow6Col1: {
+      x: paletteTopLeft.x,
+      y: Math.round(paletteTopLeft.y + rowStep),
+    },
   };
 }
 
@@ -238,18 +241,18 @@ function renderAnalysis(fileName: string, result: TemplateAnalysis): void {
   canvas.classList.add("is-visible");
   templateStatus.textContent = "校验通过";
   templateStatus.className = "status-chip is-ready";
-  $("#painted-count").textContent = String(result.paintedCells);
-  $("#color-count").textContent = String(result.colorCount);
-  $("#stroke-count").textContent = String(result.strokeCount);
-  $("#drag-count").textContent = String(result.dragStrokeCount);
+  $("#painted-count").textContent = String(result.size * result.size);
+  $("#color-count").textContent = String(result.colorCount + 1);
+  $("#stroke-count").textContent = String(result.strokeCount + result.size);
+  $("#drag-count").textContent = String(result.dragStrokeCount + result.size);
   $("#color-groups").innerHTML = result.groups.map(groupMarkup).join("");
   $("#execution-name").textContent = fileName;
-  $("#execution-detail").textContent = `${result.paintedCells} 格 · ${result.colorCount} 色 · ${result.strokeCount} 次操作`;
+  $("#execution-detail").textContent = `${result.size * result.size} 格 · ${result.colorCount + 1} 色 · ${result.strokeCount + result.size} 次操作`;
   primaryImport.disabled = false;
   primaryImport.querySelector("b")!.textContent = "READY";
   testButton.disabled = !calibrationReady();
   startButton.disabled = !calibrationReady();
-  setMessage(`${fileName} 已载入；已跳过 ${result.skippedWhite} 个白色格。`, "success");
+  setMessage(`${fileName} 已载入；执行时会先用 24 条横向笔画刷白整张画布，再覆盖其他颜色。`, "success");
   renderPreview(result);
 }
 

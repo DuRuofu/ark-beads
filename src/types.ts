@@ -50,7 +50,7 @@ export interface InputAccess {
 }
 
 export interface AutomationProgress {
-  phase: "countdown" | "drawing" | "stopped" | "completed";
+  phase: "countdown" | "prefill" | "drawing" | "stopped" | "completed";
   completed: number;
   total: number;
   message: string;

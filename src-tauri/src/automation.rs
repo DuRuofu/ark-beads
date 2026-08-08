@@ -11,7 +11,10 @@ use std::{
 use tauri::{AppHandle, Emitter, State};
 
 const GRID_SIZE: f64 = 23.0;
+const CANVAS_CELLS: usize = 24;
 const FAILSAFE_EDGE: i32 = 8;
+const WHITE_PALETTE_ROW: usize = 1;
+const WHITE_PALETTE_COLUMN: usize = 4;
 
 #[derive(Clone, Default)]
 pub struct AutomationState {
@@ -210,7 +213,12 @@ fn run_execution(
         return Err("绘制任务为空。".to_string());
     }
 
-    let total = request.groups.iter().map(|group| group.strokes.len()).sum();
+    let total = CANVAS_CELLS
+        + request
+            .groups
+            .iter()
+            .map(|group| group.strokes.len())
+            .sum::<usize>();
     let delay = request.delay_ms.clamp(20, 1_000);
     let mut enigo = create_enigo(true)?;
     emit_progress(app, "countdown", 0, total, "请切换到游戏窗口…");
@@ -221,6 +229,40 @@ fn run_execution(
     normalize_palette_top(&mut enigo, &request.calibration, delay)?;
     let mut lower_palette = false;
     let mut completed = 0;
+
+    select_palette(
+        &mut enigo,
+        &request.calibration,
+        WHITE_PALETTE_ROW,
+        WHITE_PALETTE_COLUMN,
+        delay,
+    )?;
+    for row in 0..CANVAS_CELLS {
+        wait_if_paused(&enigo, state)?;
+        if should_stop(&enigo, state)? {
+            emit_progress(app, "stopped", completed, total, "绘制已安全停止");
+            return Ok(ExecutionResult {
+                completed,
+                stopped: true,
+            });
+        }
+        let stroke = if row % 2 == 0 {
+            Stroke {
+                from: CellPoint { x: 0, y: row },
+                to: CellPoint { x: 23, y: row },
+                length: CANVAS_CELLS,
+            }
+        } else {
+            Stroke {
+                from: CellPoint { x: 23, y: row },
+                to: CellPoint { x: 0, y: row },
+                length: CANVAS_CELLS,
+            }
+        };
+        draw_stroke(&mut enigo, &request.calibration, &stroke, delay)?;
+        completed += 1;
+        emit_progress(app, "prefill", completed, total, "正在铺设白色底层");
+    }
 
     for group in request.groups {
         validate_palette(group.palette_row, group.palette_column)?;
@@ -536,7 +578,7 @@ mod tests {
             canvas_bottom_right: ScreenPoint { x: 560, y: 660 },
             palette_top_left: ScreenPoint { x: 700, y: 200 },
             palette_top_row5_col4: ScreenPoint { x: 820, y: 360 },
-            palette_bottom_row6_col1: ScreenPoint { x: 700, y: 200 },
+            palette_bottom_row6_col1: ScreenPoint { x: 700, y: 240 },
         }
     }
 
@@ -562,7 +604,7 @@ mod tests {
         );
         assert_eq!(
             palette_point(&calibration, 10, 4),
-            ScreenPoint { x: 820, y: 360 }
+            ScreenPoint { x: 820, y: 400 }
         );
     }
 }
