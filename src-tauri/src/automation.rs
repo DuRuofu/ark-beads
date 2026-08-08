@@ -11,10 +11,7 @@ use std::{
 use tauri::{AppHandle, Emitter, State};
 
 const GRID_SIZE: f64 = 23.0;
-const CANVAS_CELLS: usize = 24;
 const FAILSAFE_EDGE: i32 = 8;
-const WHITE_PALETTE_ROW: usize = 1;
-const WHITE_PALETTE_COLUMN: usize = 4;
 
 #[derive(Clone, Default)]
 pub struct AutomationState {
@@ -213,12 +210,12 @@ fn run_execution(
         return Err("绘制任务为空。".to_string());
     }
 
-    let total = CANVAS_CELLS
-        + request
-            .groups
-            .iter()
-            .map(|group| group.strokes.len())
-            .sum::<usize>();
+    let total = request
+        .groups
+        .iter()
+        .flat_map(|group| &group.strokes)
+        .map(|stroke| stroke.length)
+        .sum();
     let delay = request.delay_ms.clamp(20, 1_000);
     let mut enigo = create_enigo(true)?;
     emit_progress(app, "countdown", 0, total, "请切换到游戏窗口…");
@@ -229,50 +226,6 @@ fn run_execution(
     normalize_palette_top(&mut enigo, &request.calibration, delay)?;
     let mut lower_palette = false;
     let mut completed = 0;
-
-    select_palette(
-        &mut enigo,
-        &request.calibration,
-        WHITE_PALETTE_ROW,
-        WHITE_PALETTE_COLUMN,
-        delay,
-    )?;
-    for row in 0..CANVAS_CELLS {
-        wait_if_paused(&enigo, state)?;
-        if should_stop(&enigo, state)? {
-            emit_progress(app, "stopped", completed, total, "绘制已安全停止");
-            return Ok(ExecutionResult {
-                completed,
-                stopped: true,
-            });
-        }
-        let stroke = if row % 2 == 0 {
-            Stroke {
-                from: CellPoint { x: 0, y: row },
-                to: CellPoint { x: 23, y: row },
-                length: CANVAS_CELLS,
-            }
-        } else {
-            Stroke {
-                from: CellPoint { x: 23, y: row },
-                to: CellPoint { x: 0, y: row },
-                length: CANVAS_CELLS,
-            }
-        };
-        draw_stroke(&mut enigo, &request.calibration, &stroke, delay)?;
-        click_point(
-            &mut enigo,
-            canvas_point(&request.calibration, &CellPoint { x: 0, y: row }),
-            delay,
-        )?;
-        click_point(
-            &mut enigo,
-            canvas_point(&request.calibration, &CellPoint { x: 23, y: row }),
-            delay,
-        )?;
-        completed += 1;
-        emit_progress(app, "prefill", completed, total, "正在铺设白色底层");
-    }
 
     for group in request.groups {
         validate_palette(group.palette_row, group.palette_column)?;
@@ -306,7 +259,7 @@ fn run_execution(
                 });
             }
             draw_stroke(&mut enigo, &request.calibration, &stroke, delay)?;
-            completed += 1;
+            completed += stroke.length;
             emit_progress(app, "drawing", completed, total, "正在绘制模板");
         }
     }
@@ -470,37 +423,25 @@ fn draw_stroke(
     if stroke.length != expected_length {
         return Err("连续笔画长度校验失败。".to_string());
     }
-    if stroke.length == 1 {
-        return click_point(enigo, canvas_point(calibration, &stroke.from), delay);
-    }
-
     let direction: i32 = if stroke.to.x >= stroke.from.x { 1 } else { -1 };
     let mut x = stroke.from.x as i32;
     let end = stroke.to.x as i32;
-    move_to(enigo, canvas_point(calibration, &stroke.from))?;
-    enigo
-        .button(Button::Left, Direction::Press)
-        .map_err(input_error)?;
-    thread::sleep(Duration::from_millis(delay));
-    let movement_result = (|| {
-        while x != end {
-            x += direction;
-            let cell = CellPoint {
-                x: x as usize,
-                y: stroke.from.y,
-            };
-            move_to(enigo, canvas_point(calibration, &cell))?;
-            thread::sleep(Duration::from_millis(delay));
+    loop {
+        let cell = CellPoint {
+            x: x as usize,
+            y: stroke.from.y,
+        };
+        click_point(enigo, canvas_point(calibration, &cell), delay)?;
+        if x == end {
+            break;
         }
-        thread::sleep(Duration::from_millis(delay));
-        Ok(())
-    })();
-    let release_result = release_left_button(enigo);
-    thread::sleep(Duration::from_millis(delay.saturating_mul(2)));
-    movement_result.and(release_result)
+        x += direction;
+    }
+    Ok(())
 }
 
 fn click_point(enigo: &mut Enigo, point: ScreenPoint, delay: u64) -> Result<(), String> {
+    release_left_button(enigo)?;
     move_to(enigo, point)?;
     thread::sleep(Duration::from_millis(delay));
     enigo

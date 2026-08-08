@@ -62,7 +62,7 @@ app.innerHTML = `
           </div>
           <input id="file-input" type="file" accept="application/json,.json" />
         </div>
-        <footer class="preview-footer"><span>正式绘制前统一铺设白色底层</span><button id="choose-file" class="text-button" type="button">选择文件 ↗</button></footer>
+        <footer class="preview-footer"><span>白色在预览中显示，执行时保持画布空白</span><button id="choose-file" class="text-button" type="button">选择文件 ↗</button></footer>
       </article>
 
       <aside id="control-panel" class="control-panel panel" data-current-step="import">
@@ -74,7 +74,7 @@ app.innerHTML = `
           <div id="template-library" class="template-library"></div>
           <dl class="metrics">
             <div><dt>有效格子</dt><dd id="painted-count">—</dd></div><div><dt>使用颜色</dt><dd id="color-count">—</dd></div>
-            <div><dt>预计操作</dt><dd id="stroke-count">—</dd></div><div><dt>连续拖动</dt><dd id="drag-count">—</dd></div>
+            <div><dt>预计单击</dt><dd id="stroke-count">—</dd></div><div><dt>连续拖动</dt><dd id="drag-count">—</dd></div>
           </dl>
           <div class="section-label"><span>调色板任务</span><i></i></div>
           <div id="color-groups" class="color-groups"><p class="placeholder-copy">导入后按调色板顺序生成任务</p></div>
@@ -93,7 +93,7 @@ app.innerHTML = `
         <section class="step-view" data-view="execute">
           <div class="panel-heading compact"><div><p class="panel-index">AUTOMATION CONTROL</p><h2>执行绘制</h2></div><span id="run-state" class="status-chip">待命</span></div>
           <div class="execution-summary"><span>当前任务</span><strong id="execution-name">尚未导入</strong><small id="execution-detail">—</small></div>
-          <label class="speed-control"><span>每格间隔 <b id="speed-label">55 ms</b></span><input id="speed" type="range" min="25" max="160" value="55" step="5" /></label>
+          <label class="speed-control"><span>每格间隔 <b id="speed-label">65 ms</b></span><input id="speed" type="range" min="40" max="180" value="65" step="5" /></label>
           <div class="progress-block"><div><span id="progress-label">等待启动</span><b id="progress-count">0 / 0</b></div><progress id="progress" value="0" max="1"></progress></div>
           <button id="test-cell" class="secondary-button full" type="button" disabled>单格试点（执行前推荐）</button>
           <button id="start" class="primary-button start-button" type="button" disabled><span>开始自动绘制</span><b>4 SEC</b></button>
@@ -301,7 +301,7 @@ function renderPreview(result: TemplateAnalysis): void {
 }
 
 function groupMarkup(group: ColorGroup): string {
-  return `<div class="color-task"><i style="--swatch:${group.hex}"></i><div><b>色板 ${group.paletteRow}-${group.paletteColumn}</b><span>${group.cellCount} 格 · ${group.strokes.length} 次操作</span></div><code>${group.hex}</code></div>`;
+  return `<div class="color-task"><i style="--swatch:${group.hex}"></i><div><b>色板 ${group.paletteRow}-${group.paletteColumn}</b><span>${group.cellCount} 格 · ${group.cellCount} 次精确单击</span></div><code>${group.hex}</code></div>`;
 }
 
 function renderAnalysis(fileName: string, json: string, result: TemplateAnalysis): void {
@@ -312,19 +312,19 @@ function renderAnalysis(fileName: string, json: string, result: TemplateAnalysis
   canvas.classList.add("is-visible");
   templateStatus.textContent = "校验通过";
   templateStatus.className = "status-chip is-ready";
-  $("#painted-count").textContent = String(result.size * result.size);
-  $("#color-count").textContent = String(result.colorCount + 1);
-  $("#stroke-count").textContent = String(result.strokeCount + result.size);
-  $("#drag-count").textContent = String(result.dragStrokeCount + result.size);
+  $("#painted-count").textContent = String(result.paintedCells);
+  $("#color-count").textContent = String(result.colorCount);
+  $("#stroke-count").textContent = String(result.paintedCells);
+  $("#drag-count").textContent = "0";
   $("#color-groups").innerHTML = result.groups.map(groupMarkup).join("");
   $("#execution-name").textContent = fileName;
-  $("#execution-detail").textContent = `${result.size * result.size} 格 · ${result.colorCount + 1} 色 · ${result.strokeCount + result.size} 次操作`;
+  $("#execution-detail").textContent = `${result.paintedCells} 个非白格 · ${result.colorCount} 色 · 精确单击模式`;
   primaryImport.disabled = false;
   ($("#export-template") as HTMLButtonElement).disabled = false;
   primaryImport.querySelector("b")!.textContent = "READY";
   testButton.disabled = !calibrationReady();
   startButton.disabled = !calibrationReady();
-  setMessage(`${fileName} 已载入；执行时会先用 24 条横向笔画刷白整张画布，再覆盖其他颜色。`, "success");
+  setMessage(`${fileName} 已载入；白色格保持空白，其余 ${result.paintedCells} 格将逐格精确单击。`, "success");
   renderPreview(result);
 }
 
