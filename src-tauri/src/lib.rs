@@ -62,20 +62,39 @@ async fn start_automation(
     restore_window(&window, result)
 }
 
+#[cfg(target_os = "windows")]
+fn hide_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window
+        .minimize()
+        .map_err(|error| format!("无法暂时最小化 Ark Beads：{error}"))
+}
+
+#[cfg(not(target_os = "windows"))]
 fn hide_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     window
         .hide()
         .map_err(|error| format!("无法暂时隐藏 Ark Beads：{error}"))
 }
 
+#[cfg(target_os = "windows")]
+fn show_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    window
+        .unminimize()
+        .and_then(|_| window.show())
+        .and_then(|_| window.set_focus())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    window.show().and_then(|_| window.set_focus())
+}
+
 fn restore_window<T>(
     window: &tauri::WebviewWindow,
     result: Result<T, String>,
 ) -> Result<T, String> {
-    let restore_result = window
-        .show()
-        .and_then(|_| window.set_focus())
-        .map_err(|error| format!("无法恢复 Ark Beads 窗口：{error}"));
+    let restore_result =
+        show_window(window).map_err(|error| format!("无法恢复 Ark Beads 窗口：{error}"));
 
     match (result, restore_result) {
         (Err(error), _) => Err(error),

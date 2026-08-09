@@ -33,8 +33,7 @@ pub struct Calibration {
     canvas_top_left: ScreenPoint,
     canvas_bottom_right: ScreenPoint,
     palette_top_left: ScreenPoint,
-    palette_top_row5_col4: ScreenPoint,
-    palette_bottom_row6_col1: ScreenPoint,
+    palette_bottom_right: ScreenPoint,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -145,6 +144,7 @@ pub async fn test_cell(
         let mut enigo = create_enigo(true)?;
         let delay = delay_ms.clamp(20, 1_000);
 
+        activate_game_surface(&mut enigo, &calibration, delay)?;
         normalize_palette_top(&mut enigo, &calibration, delay)?;
         if palette_row > 5 {
             scroll_palette_bottom(&mut enigo, &calibration, delay)?;
@@ -226,6 +226,7 @@ fn run_execution(
         request.countdown_ms.clamp(1_000, 10_000),
     ));
 
+    activate_game_surface(&mut enigo, &request.calibration, delay)?;
     normalize_palette_top(&mut enigo, &request.calibration, delay)?;
     let mut lower_palette = false;
     let mut completed = 0;
@@ -294,10 +295,10 @@ fn validate_calibration(calibration: &Calibration) -> Result<(), String> {
     {
         return Err("画布校准点顺序不正确。".to_string());
     }
-    if calibration.palette_top_row5_col4.x <= calibration.palette_top_left.x
-        || calibration.palette_top_row5_col4.y <= calibration.palette_top_left.y
+    if calibration.palette_bottom_right.x <= calibration.palette_top_left.x
+        || calibration.palette_bottom_right.y <= calibration.palette_top_left.y
     {
-        return Err("调色板顶部参考点顺序不正确。".to_string());
+        return Err("色盘第一页校准点顺序不正确。".to_string());
     }
     Ok(())
 }
@@ -318,8 +319,8 @@ fn validate_cell(cell: &CellPoint) -> Result<(), String> {
 
 fn palette_spacing(calibration: &Calibration) -> (f64, f64) {
     (
-        f64::from(calibration.palette_top_row5_col4.x - calibration.palette_top_left.x) / 3.0,
-        f64::from(calibration.palette_top_row5_col4.y - calibration.palette_top_left.y) / 4.0,
+        f64::from(calibration.palette_bottom_right.x - calibration.palette_top_left.x) / 3.0,
+        f64::from(calibration.palette_bottom_right.y - calibration.palette_top_left.y) / 4.0,
     )
 }
 
@@ -334,11 +335,10 @@ fn palette_point(calibration: &Calibration, row: usize, column: usize) -> Screen
         }
     } else {
         ScreenPoint {
-            x: (f64::from(calibration.palette_bottom_row6_col1.x)
-                + (column - 1) as f64 * column_step)
+            x: (f64::from(calibration.palette_top_left.x) + (column - 1) as f64 * column_step)
                 .round() as i32,
-            y: (f64::from(calibration.palette_bottom_row6_col1.y) + (row - 6) as f64 * row_step)
-                .round() as i32,
+            y: (f64::from(calibration.palette_top_left.y) + (row - 5) as f64 * row_step).round()
+                as i32,
         }
     }
 }
@@ -364,11 +364,34 @@ fn select_palette(
     delay: u64,
 ) -> Result<(), String> {
     release_left_button(enigo)?;
-    click_point(
-        enigo,
-        palette_point(calibration, row, column),
-        delay.saturating_mul(2),
-    )
+    let point = palette_point(calibration, row, column);
+    click_point(enigo, point, delay.saturating_mul(2))?;
+    #[cfg(target_os = "windows")]
+    click_point(enigo, point, delay.saturating_mul(2))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn activate_game_surface(
+    enigo: &mut Enigo,
+    calibration: &Calibration,
+    delay: u64,
+) -> Result<(), String> {
+    release_left_button(enigo)?;
+    let point = calibration.palette_top_left;
+    click_point(enigo, point, delay.saturating_mul(2))?;
+    click_point(enigo, point, delay.saturating_mul(2))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn activate_game_surface(
+    enigo: &mut Enigo,
+    _calibration: &Calibration,
+    _delay: u64,
+) -> Result<(), String> {
+    release_left_button(enigo)?;
+    Ok(())
 }
 
 fn normalize_palette_top(
@@ -413,6 +436,18 @@ fn scroll_palette_bottom(
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn reset_game_pointer_state(
+    _window: &WebviewWindow,
+    enigo: &mut Enigo,
+    delay: u64,
+) -> Result<(), String> {
+    release_left_button(enigo)?;
+    thread::sleep(Duration::from_millis(delay.saturating_mul(4).max(200)));
+    release_left_button(enigo)
+}
+
+#[cfg(not(target_os = "windows"))]
 fn reset_game_pointer_state(
     window: &WebviewWindow,
     enigo: &mut Enigo,
@@ -471,7 +506,11 @@ fn click_point(enigo: &mut Enigo, point: ScreenPoint, delay: u64) -> Result<(), 
     enigo
         .button(Button::Left, Direction::Press)
         .map_err(input_error)?;
-    thread::sleep(Duration::from_millis((delay / 2).max(20)));
+    #[cfg(target_os = "windows")]
+    let hold_delay = (delay / 2).max(45);
+    #[cfg(not(target_os = "windows"))]
+    let hold_delay = (delay / 2).max(20);
+    thread::sleep(Duration::from_millis(hold_delay));
     let release_result = release_left_button(enigo);
     thread::sleep(Duration::from_millis(delay));
     let safety_release_result = release_left_button(enigo);
@@ -567,8 +606,7 @@ mod tests {
             canvas_top_left: ScreenPoint { x: 100, y: 200 },
             canvas_bottom_right: ScreenPoint { x: 560, y: 660 },
             palette_top_left: ScreenPoint { x: 700, y: 200 },
-            palette_top_row5_col4: ScreenPoint { x: 820, y: 360 },
-            palette_bottom_row6_col1: ScreenPoint { x: 700, y: 240 },
+            palette_bottom_right: ScreenPoint { x: 820, y: 360 },
         }
     }
 
@@ -588,6 +626,10 @@ mod tests {
     #[test]
     fn derives_palette_grid_from_reference_points() {
         let calibration = calibration();
+        assert_eq!(
+            palette_point(&calibration, 5, 4),
+            ScreenPoint { x: 820, y: 360 }
+        );
         assert_eq!(
             palette_point(&calibration, 3, 2),
             ScreenPoint { x: 740, y: 280 }

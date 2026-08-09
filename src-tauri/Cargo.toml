@@ -1,6 +1,6 @@
 [package]
 name = "ark-beads"
-version = "0.1.1"
+version = "0.1.2"
 description = "Offline automation tool for the Arknights bead minigame"
 authors = ["DuRuofu"]
 edition = "2024"

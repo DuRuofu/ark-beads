@@ -25,13 +25,15 @@ import type {
 type Step = "import" | "calibrate" | "execute";
 type CalibrationKey = keyof Calibration;
 
-const CALIBRATION_KEY = "ark-beads.calibration.v1";
+const CALIBRATION_KEY = "ark-beads.calibration.v2";
 const THEME_KEY = "ark-beads.theme";
 const LIBRARY_KEY = "ark-beads.template-library.v1";
 const MAX_SAVED_TEMPLATES = 8;
 const calibrationItems: Array<{ key: CalibrationKey; index: string; title: string; detail: string }> = [
   { key: "canvasTopLeft", index: "A1", title: "画布左上格中心", detail: "第 1 行第 1 列中心" },
   { key: "canvasBottomRight", index: "A2", title: "画布右下格中心", detail: "第 24 行第 24 列中心" },
+  { key: "paletteTopLeft", index: "P1", title: "色盘第一页左上色块", detail: "第 1 行第 1 列（黑色）中心" },
+  { key: "paletteBottomRight", index: "P2", title: "色盘第一页右下色块", detail: "第 5 行第 4 列中心" },
 ];
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -46,7 +48,7 @@ app.innerHTML = `
       </div>
       <div class="topbar-actions">
         <button id="theme-toggle" class="icon-button" type="button" aria-label="切换明暗主题"><span>◐</span><b>THEME</b></button>
-        <div class="platform-badge"><i></i> macOS · LOCAL</div>
+        <div id="platform-badge" class="platform-badge"><i></i> DESKTOP · LOCAL</div>
       </div>
     </header>
 
@@ -93,11 +95,11 @@ app.innerHTML = `
         </section>
 
         <section class="step-view" data-view="calibrate">
-          <div class="panel-heading compact"><div><p class="panel-index">POSITION REGISTER</p><h2>两点快速校准</h2></div><button id="permission-button" class="mini-button" type="button">检查权限</button></div>
-          <p class="instruction">只需采集画布两个对角格的中心。程序会按官方客户端的固定比例自动计算调色板；游戏窗口位置改变后再重新校准。</p>
+          <div class="panel-heading compact"><div><p class="panel-index">POSITION REGISTER</p><h2>四点精准校准</h2></div><button id="permission-button" class="mini-button" type="button">检查权限</button></div>
+          <p class="instruction">依次采集画布两个对角格，以及色盘第一页左上、右下色块的中心。四点都直接来自当前游戏窗口，不再使用固定比例推算。</p>
           <div id="calibration-list" class="calibration-list"></div>
           <div class="safety-note"><b>FAILSAFE</b><span>绘制中将鼠标移至屏幕左上角即可紧急停止。</span></div>
-          <div class="button-row"><button id="back-import" class="secondary-button" type="button">返回</button><button id="to-execute" class="primary-button" type="button" disabled><span>校准完成</span><b>02 / 02</b></button></div>
+          <div class="button-row"><button id="back-import" class="secondary-button" type="button">返回</button><button id="to-execute" class="primary-button" type="button" disabled><span>校准完成</span><b>04 / 04</b></button></div>
         </section>
 
         <section class="step-view" data-view="execute">
@@ -197,7 +199,7 @@ const progress = $("#progress") as HTMLProgressElement;
 let analysis: TemplateAnalysis | null = null;
 let currentJson = "";
 let currentTemplateName = "";
-let calibration: Partial<Calibration> = derivePaletteCalibration(loadCalibration());
+let calibration: Partial<Calibration> = loadCalibration();
 let savedTemplates = loadSavedTemplates();
 let running = false;
 let paused = false;
@@ -233,6 +235,7 @@ function setTheme(theme: "light" | "dark"): void {
 const storedTheme = localStorage.getItem(THEME_KEY);
 setTheme(storedTheme === "light" || storedTheme === "dark" ? storedTheme : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 $("#theme-toggle").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+$("#platform-badge").lastChild!.textContent = navigator.userAgent.includes("Windows") ? " WINDOWS · LOCAL" : " macOS · LOCAL";
 
 function setMessage(text: string, kind: "info" | "success" | "error"): void {
   message.textContent = text;
@@ -243,7 +246,7 @@ function setStep(step: Step): void {
   $("#control-panel").setAttribute("data-current-step", step);
   document.querySelectorAll<HTMLElement>("[data-step]").forEach((node) => node.classList.toggle("is-active", node.dataset.step === step));
   document.querySelectorAll<HTMLElement>("[data-view]").forEach((node) => node.classList.toggle("is-active", node.dataset.view === step));
-  if (step === "calibrate") setMessage("依次采集两个画布中心点；坐标仅保存在这台电脑。", "info");
+  if (step === "calibrate") setMessage("依次采集画布两点和色盘第一页两点；坐标仅保存在这台电脑。", "info");
   if (step === "execute") setMessage("先做单格试点。正式启动后有 4 秒切换回游戏窗口。", "info");
 }
 
@@ -311,40 +314,11 @@ function renderTemplateLibrary(): void {
   $("#template-library").innerHTML = builtIns + saved;
 }
 
-function derivePaletteCalibration(value: Partial<Calibration>): Partial<Calibration> {
-  const topLeft = value.canvasTopLeft;
-  const bottomRight = value.canvasBottomRight;
-  if (!topLeft || !bottomRight || bottomRight.x <= topLeft.x || bottomRight.y <= topLeft.y) return value;
-
-  const width = bottomRight.x - topLeft.x;
-  const height = bottomRight.y - topLeft.y;
-  const paletteTopLeft = {
-    x: Math.round(topLeft.x + width * 1.26738),
-    y: Math.round(topLeft.y + height * 0.28762),
-  };
-  const columnStep = width * 0.12923;
-  const rowStep = height * 0.12823;
-
-  return {
-    ...value,
-    paletteTopLeft,
-    paletteTopRow5Col4: {
-      x: Math.round(paletteTopLeft.x + columnStep * 3),
-      y: Math.round(paletteTopLeft.y + rowStep * 4),
-    },
-    paletteBottomRow6Col1: {
-      x: paletteTopLeft.x,
-      y: Math.round(paletteTopLeft.y + rowStep),
-    },
-  };
-}
-
 function calibrationReady(): boolean {
   return calibration.canvasTopLeft !== undefined
     && calibration.canvasBottomRight !== undefined
     && calibration.paletteTopLeft !== undefined
-    && calibration.paletteTopRow5Col4 !== undefined
-    && calibration.paletteBottomRow6Col1 !== undefined;
+    && calibration.paletteBottomRight !== undefined;
 }
 
 function renderCalibration(): void {
@@ -362,7 +336,6 @@ async function captureCalibration(button: HTMLButtonElement): Promise<void> {
   setMessage("窗口将隐藏，3 秒后读取鼠标位置。请移到游戏目标中心并保持不动…", "info");
   try {
     calibration[key] = await invoke<ScreenPoint>("capture_pointer", { delayMs: 3000 });
-    calibration = derivePaletteCalibration(calibration);
     localStorage.setItem(CALIBRATION_KEY, JSON.stringify(calibration));
     renderCalibration();
     setMessage("坐标已记录。继续采集下一点。", "success");

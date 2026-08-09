@@ -39,8 +39,7 @@ export interface Calibration {
   canvasTopLeft: ScreenPoint;
   canvasBottomRight: ScreenPoint;
   paletteTopLeft: ScreenPoint;
-  paletteTopRow5Col4: ScreenPoint;
-  paletteBottomRow6Col1: ScreenPoint;
+  paletteBottomRight: ScreenPoint;
 }
 
 export interface InputAccess {
