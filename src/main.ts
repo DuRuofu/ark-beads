@@ -1,5 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import {
+  ARK_PALETTE,
+  CONVERSION_PRESETS,
+  convertImage,
+  createTemplateFromPaletteIndices,
+  loadImage,
+  type ConversionPreset,
+  type ConversionSettings,
+  type GeneratedTemplate,
+} from "./image-converter";
 import { PRESET_TEMPLATES } from "./presets";
 import "./styles.css";
 import type {
@@ -57,12 +67,12 @@ app.innerHTML = `
         <div id="drop-zone" class="drop-zone">
           <canvas id="preview" width="576" height="576" aria-label="拼豆模板预览"></canvas>
           <div id="empty-state" class="empty-state">
-            <div class="file-glyph" aria-hidden="true">JSON</div>
-            <strong>拖入模板文件</strong><span>或点击选择网站导出的 JSON</span>
+            <div class="file-glyph" aria-hidden="true">24²</div>
+            <strong>拖入 JSON 或图片</strong><span>模板直接校验，图片在本机转换</span>
           </div>
-          <input id="file-input" type="file" accept="application/json,.json" />
+          <input id="file-input" type="file" accept="application/json,.json,image/png,image/jpeg,image/webp,image/gif,image/bmp" />
         </div>
-        <footer class="preview-footer"><span>白色在预览中显示，执行时保持画布空白</span><button id="choose-file" class="text-button" type="button">选择文件 ↗</button></footer>
+        <footer class="preview-footer"><span>白色在预览中显示，执行时保持画布空白</span><div><button id="edit-template" class="text-button" type="button" disabled>编辑像素画</button><button id="choose-file" class="text-button" type="button">导入 JSON</button><button id="choose-image" class="text-button" type="button">图片转模板 ↗</button></div></footer>
       </article>
 
       <aside id="control-panel" class="control-panel panel" data-current-step="import">
@@ -103,6 +113,68 @@ app.innerHTML = `
         </section>
       </aside>
     </section>
+
+    <div id="image-studio" class="studio-backdrop" hidden>
+      <section class="studio-dialog" role="dialog" aria-modal="true" aria-labelledby="studio-title">
+        <header class="studio-heading">
+          <div><p class="panel-index">LOCAL PIXEL LAB / 24×24</p><h2 id="studio-title">图片转像素画</h2></div>
+          <button id="close-studio" class="studio-close" type="button" aria-label="关闭">×</button>
+        </header>
+        <p id="image-source-detail" class="studio-copy">所有处理均在本机完成，不会上传原图。</p>
+        <div class="studio-workspace">
+          <div class="studio-preview">
+            <canvas id="conversion-preview" width="576" height="576" aria-label="图片转换预览"></canvas>
+            <div><b>24 × 24</b><span>ARK OFFICIAL / 40 COLORS</span></div>
+          </div>
+          <div class="studio-controls">
+            <div class="preset-selector" aria-label="转换方案">
+              <button data-conversion-preset="balanced" class="is-active" type="button"><b>均衡</b><span>通用首选</span></button>
+              <button data-conversion-preset="crisp" type="button"><b>清晰轮廓</b><span>图标 / 插画</span></button>
+              <button data-conversion-preset="smooth" type="button"><b>平滑过渡</b><span>照片 / 渐变</span></button>
+              <button data-conversion-preset="detail" type="button"><b>细节抖动</b><span>保留层次</span></button>
+            </div>
+            <div class="studio-settings">
+              <label><span>缩放采样</span><select id="conversion-algorithm"><option value="box">区域均值</option><option value="nearest">最近邻</option><option value="bilinear">双线性</option></select></label>
+              <label><span>画面适配</span><select id="conversion-fit"><option value="contain">完整显示</option><option value="cover">居中裁切</option><option value="stretch">拉伸填满</option></select></label>
+              <label class="studio-range"><span>轮廓增强 <b id="edge-label">45%</b></span><input id="conversion-edge" type="range" min="0" max="100" value="45" /></label>
+              <label class="studio-range"><span>对比度 <b id="contrast-label">+8</b></span><input id="conversion-contrast" type="range" min="-40" max="40" value="8" /></label>
+              <label class="studio-range"><span>饱和度 <b id="saturation-label">+8</b></span><input id="conversion-saturation" type="range" min="-40" max="40" value="8" /></label>
+              <label class="dither-toggle"><input id="conversion-dither" type="checkbox" /><span><b>误差扩散</b><small>用相邻色点保留有限色板中的明暗过渡</small></span></label>
+            </div>
+            <div class="studio-note"><b>TIP</b><span>复杂照片适合“细节抖动”；Logo、角色立绘和线稿可先试“清晰轮廓”。</span></div>
+          </div>
+        </div>
+        <footer class="studio-actions"><button id="cancel-conversion" class="secondary-button" type="button">取消</button><button id="edit-conversion" class="secondary-button" type="button">进入像素精修</button><button id="use-conversion" class="secondary-button" type="button">加入模板库</button><button id="save-conversion" class="primary-button" type="button"><span>保存 JSON</span><b>LOCAL</b></button></footer>
+      </section>
+    </div>
+
+    <div id="pixel-editor" class="studio-backdrop editor-backdrop" hidden>
+      <section class="editor-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+        <header class="studio-heading">
+          <div><p class="panel-index">PIXEL DETAIL WORKBENCH / 24×24</p><h2 id="editor-title">像素精修</h2></div>
+          <button id="close-editor" class="studio-close" type="button" aria-label="关闭">×</button>
+        </header>
+        <div class="editor-workspace">
+          <aside class="editor-palette-panel">
+            <div class="editor-section-title"><b>官方色板</b><span>40 COLORS</span></div>
+            <div id="editor-palette" class="editor-palette"></div>
+          </aside>
+          <div class="editor-canvas-panel">
+            <canvas id="editor-canvas" width="720" height="720" aria-label="24×24 像素编辑画布"></canvas>
+            <p>单击或按住拖动即可修改格子；吸色模式下点击画布选择已有颜色。</p>
+          </div>
+          <aside class="editor-tool-panel">
+            <div class="editor-section-title"><b>精修工具</b><span>LOCAL</span></div>
+            <div class="selected-color"><i id="selected-color-swatch"></i><div><span>当前颜色</span><b id="selected-color-name">色板 1-1</b><code id="selected-color-hex">#222222</code></div></div>
+            <div class="editor-tool-grid"><button id="brush-tool" class="mini-button is-active" type="button">画笔</button><button id="picker-tool" class="mini-button" type="button">吸色</button></div>
+            <div class="editor-tool-grid"><button id="undo-edit" class="mini-button" type="button" disabled>撤销</button><button id="redo-edit" class="mini-button" type="button" disabled>重做</button></div>
+            <button id="reset-edit" class="secondary-button full" type="button">恢复进入编辑时的版本</button>
+            <div class="studio-note"><b>WHITE</b><span>选择色板中的白色可以擦除格子；白色仍会保留在预览和 JSON 中，但执行时不会绘制。</span></div>
+          </aside>
+        </div>
+        <footer class="editor-actions"><button id="cancel-editor" class="secondary-button" type="button">取消</button><button id="apply-editor" class="secondary-button" type="button">应用并加入模板库</button><button id="save-editor" class="primary-button" type="button"><span>应用并保存 JSON</span><b>DONE</b></button></footer>
+      </section>
+    </div>
   </main>
 `;
 
@@ -129,6 +201,28 @@ let calibration: Partial<Calibration> = derivePaletteCalibration(loadCalibration
 let savedTemplates = loadSavedTemplates();
 let running = false;
 let paused = false;
+let sourceImage: HTMLImageElement | null = null;
+let sourceImageName = "";
+let generatedTemplate: GeneratedTemplate | null = null;
+let conversionSettings: ConversionSettings = { ...CONVERSION_PRESETS.balanced };
+let conversionFrame = 0;
+let editorPixels: number[] = [];
+let editorOriginalPixels: number[] = [];
+let editorUndo: number[][] = [];
+let editorRedo: number[][] = [];
+let editorSelectedColor = 0;
+let editorTool: "brush" | "picker" = "brush";
+let editorPainting = false;
+let editorSource: "template" | "conversion" = "template";
+
+function fitMainPreview(): void {
+  const bounds = dropZone.getBoundingClientRect();
+  const size = Math.max(120, Math.min(560, bounds.width - 32, bounds.height - 34));
+  canvas.style.width = `${size}px`;
+  canvas.style.height = `${size}px`;
+}
+
+new ResizeObserver(fitMainPreview).observe(dropZone);
 
 function setTheme(theme: "light" | "dark"): void {
   document.documentElement.dataset.theme = theme;
@@ -279,25 +373,272 @@ async function captureCalibration(button: HTMLButtonElement): Promise<void> {
 }
 
 function renderPreview(result: TemplateAnalysis): void {
-  const context = canvas.getContext("2d");
+  renderPreviewColors(result.preview, result.size);
+}
+
+function renderPreviewColors(colors: Array<string | null>, size: number): void {
+  drawPreview(canvas, colors, size);
+}
+
+function drawPreview(target: HTMLCanvasElement, colors: Array<string | null>, size: number): void {
+  const context = target.getContext("2d");
   if (!context) return;
-  const cellSize = canvas.width / result.size;
+  const cellSize = target.width / size;
   context.fillStyle = "#fff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  result.preview.forEach((color, index) => {
+  context.fillRect(0, 0, target.width, target.height);
+  colors.forEach((color, index) => {
     if (!color || color.toUpperCase() === "#FFFFFF") return;
     context.fillStyle = color;
-    context.fillRect((index % result.size) * cellSize, Math.floor(index / result.size) * cellSize, cellSize, cellSize);
+    context.fillRect((index % size) * cellSize, Math.floor(index / size) * cellSize, cellSize, cellSize);
   });
   context.strokeStyle = "rgba(18, 22, 25, .12)";
   context.lineWidth = 1;
-  for (let index = 1; index < result.size; index += 1) {
+  for (let index = 1; index < size; index += 1) {
     const point = index * cellSize;
-    context.beginPath(); context.moveTo(point, 0); context.lineTo(point, canvas.height); context.moveTo(0, point); context.lineTo(canvas.width, point); context.stroke();
+    context.beginPath(); context.moveTo(point, 0); context.lineTo(point, target.height); context.moveTo(0, point); context.lineTo(target.width, point); context.stroke();
   }
   context.strokeStyle = "#18bbb7";
   context.lineWidth = 3;
-  context.beginPath(); context.moveTo(canvas.width / 2, 0); context.lineTo(canvas.width / 2, canvas.height); context.moveTo(0, canvas.height / 2); context.lineTo(canvas.width, canvas.height / 2); context.stroke();
+  context.beginPath(); context.moveTo(target.width / 2, 0); context.lineTo(target.width / 2, target.height); context.moveTo(0, target.height / 2); context.lineTo(target.width, target.height / 2); context.stroke();
+}
+
+function setConversionControls(settings: ConversionSettings): void {
+  ($("#conversion-algorithm") as HTMLSelectElement).value = settings.algorithm;
+  ($("#conversion-fit") as HTMLSelectElement).value = settings.fit;
+  ($("#conversion-edge") as HTMLInputElement).value = String(settings.edgeStrength);
+  ($("#conversion-contrast") as HTMLInputElement).value = String(settings.contrast);
+  ($("#conversion-saturation") as HTMLInputElement).value = String(settings.saturation);
+  ($("#conversion-dither") as HTMLInputElement).checked = settings.dither;
+  updateConversionLabels();
+}
+
+function readConversionControls(): ConversionSettings {
+  return {
+    algorithm: ($("#conversion-algorithm") as HTMLSelectElement).value as ConversionSettings["algorithm"],
+    fit: ($("#conversion-fit") as HTMLSelectElement).value as ConversionSettings["fit"],
+    edgeStrength: Number(($("#conversion-edge") as HTMLInputElement).value),
+    contrast: Number(($("#conversion-contrast") as HTMLInputElement).value),
+    saturation: Number(($("#conversion-saturation") as HTMLInputElement).value),
+    dither: ($("#conversion-dither") as HTMLInputElement).checked,
+  };
+}
+
+function signedValue(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
+}
+
+function updateConversionLabels(): void {
+  $("#edge-label").textContent = `${($("#conversion-edge") as HTMLInputElement).value}%`;
+  $("#contrast-label").textContent = signedValue(Number(($("#conversion-contrast") as HTMLInputElement).value));
+  $("#saturation-label").textContent = signedValue(Number(($("#conversion-saturation") as HTMLInputElement).value));
+}
+
+function renderConversionPreview(): void {
+  if (!sourceImage) return;
+  conversionSettings = readConversionControls();
+  generatedTemplate = convertImage(sourceImage, conversionSettings);
+  emptyState.hidden = true;
+  canvas.classList.add("is-visible");
+  templateStatus.textContent = "图片预览";
+  templateStatus.className = "status-chip is-ready";
+  renderPreviewColors(generatedTemplate.colors, 24);
+  drawPreview($("#conversion-preview") as HTMLCanvasElement, generatedTemplate.colors, 24);
+}
+
+function queueConversionPreview(): void {
+  window.cancelAnimationFrame(conversionFrame);
+  conversionFrame = window.requestAnimationFrame(renderConversionPreview);
+}
+
+function closeImageStudio(restore = true): void {
+  ($("#image-studio") as HTMLDivElement).hidden = true;
+  sourceImage = null;
+  generatedTemplate = null;
+  window.cancelAnimationFrame(conversionFrame);
+  if (!restore) return;
+  if (analysis) {
+    renderPreview(analysis);
+    templateStatus.textContent = "校验通过";
+    templateStatus.className = "status-chip is-ready";
+  } else {
+    canvas.classList.remove("is-visible");
+    emptyState.hidden = false;
+    templateStatus.textContent = "等待导入";
+    templateStatus.className = "status-chip";
+  }
+}
+
+async function openImageStudio(file: File): Promise<void> {
+  setMessage("正在本机读取图片并生成 24×24 预览…", "info");
+  try {
+    sourceImage = await loadImage(file);
+    sourceImageName = file.name.replace(/\.[^.]+$/, "") || "像素画模板";
+    conversionSettings = { ...CONVERSION_PRESETS.balanced };
+    generatedTemplate = null;
+    setConversionControls(conversionSettings);
+    document.querySelectorAll<HTMLElement>("[data-conversion-preset]").forEach((button) => button.classList.toggle("is-active", button.dataset.conversionPreset === "balanced"));
+    $("#image-source-detail").textContent = `${file.name} · ${sourceImage.naturalWidth}×${sourceImage.naturalHeight} · 所有处理均在本机完成`;
+    ($("#image-studio") as HTMLDivElement).hidden = false;
+    renderConversionPreview();
+    setMessage("调整方案和参数，左侧会实时显示官方 40 色预览。", "success");
+  } catch (error) {
+    sourceImage = null;
+    setMessage(String(error), "error");
+  }
+}
+
+async function acceptGeneratedTemplate(saveFile: boolean): Promise<void> {
+  if (!generatedTemplate) return;
+  const json = generatedTemplate.json;
+  const fileName = `${sourceImageName || "像素画模板"}.json`;
+  try {
+    const result = await invoke<TemplateAnalysis>("analyze_template", { json });
+    closeImageStudio(false);
+    renderAnalysis(fileName, json, result);
+    rememberTemplate(fileName, json);
+    if (saveFile) exportCurrentTemplate();
+    else setMessage(`${fileName} 已生成并加入本机模板库。`, "success");
+  } catch (error) {
+    setMessage(String(error), "error");
+  }
+}
+
+function templatePaletteIndices(json: string): number[] {
+  const parsed = JSON.parse(json) as { cells?: Array<{ x?: number; y?: number; hex?: string | null }> };
+  if (!Array.isArray(parsed.cells) || parsed.cells.length !== 576) throw new Error("模板必须包含 576 个格子。");
+  const pixels = new Array<number>(576).fill(3);
+  parsed.cells.forEach((cell) => {
+    if (!Number.isInteger(cell.x) || !Number.isInteger(cell.y) || cell.x! < 0 || cell.x! >= 24 || cell.y! < 0 || cell.y! >= 24) throw new Error("模板中存在无效坐标。");
+    const paletteIndex = cell.hex ? ARK_PALETTE.findIndex((hex) => hex.toUpperCase() === cell.hex!.toUpperCase()) : 3;
+    if (paletteIndex < 0) throw new Error(`模板包含官方色板外的颜色：${cell.hex}`);
+    pixels[cell.y! * 24 + cell.x!] = paletteIndex;
+  });
+  return pixels;
+}
+
+function renderEditorPalette(): void {
+  $("#editor-palette").innerHTML = ARK_PALETTE.map((hex, index) => `
+    <button class="editor-color ${index === editorSelectedColor ? "is-active" : ""}" data-editor-color="${index}" type="button" aria-label="色板 ${Math.floor(index / 4) + 1}-${index % 4 + 1} ${hex}">
+      <i style="--editor-color:${hex}"></i><span>${Math.floor(index / 4) + 1}-${index % 4 + 1}</span>
+    </button>
+  `).join("");
+}
+
+function selectEditorColor(index: number): void {
+  editorSelectedColor = index;
+  const hex = ARK_PALETTE[index];
+  $("#selected-color-swatch").setAttribute("style", `--editor-color:${hex}`);
+  $("#selected-color-name").textContent = `色板 ${Math.floor(index / 4) + 1}-${index % 4 + 1}`;
+  $("#selected-color-hex").textContent = hex;
+  renderEditorPalette();
+}
+
+function setEditorTool(tool: "brush" | "picker"): void {
+  editorTool = tool;
+  $("#brush-tool").classList.toggle("is-active", tool === "brush");
+  $("#picker-tool").classList.toggle("is-active", tool === "picker");
+}
+
+function drawEditor(): void {
+  const target = $("#editor-canvas") as HTMLCanvasElement;
+  const context = target.getContext("2d");
+  if (!context) return;
+  const cellSize = target.width / 24;
+  editorPixels.forEach((paletteIndex, index) => {
+    context.fillStyle = ARK_PALETTE[paletteIndex];
+    context.fillRect((index % 24) * cellSize, Math.floor(index / 24) * cellSize, cellSize, cellSize);
+  });
+  context.strokeStyle = "rgba(18, 22, 25, .18)";
+  context.lineWidth = 1;
+  for (let index = 0; index <= 24; index += 1) {
+    const point = index * cellSize;
+    context.beginPath();
+    context.moveTo(point, 0); context.lineTo(point, target.height);
+    context.moveTo(0, point); context.lineTo(target.width, point);
+    context.stroke();
+  }
+  context.strokeStyle = "#18bbb7";
+  context.lineWidth = 3;
+  context.beginPath();
+  context.moveTo(target.width / 2, 0); context.lineTo(target.width / 2, target.height);
+  context.moveTo(0, target.height / 2); context.lineTo(target.width, target.height / 2);
+  context.stroke();
+}
+
+function updateEditorHistoryButtons(): void {
+  ($("#undo-edit") as HTMLButtonElement).disabled = editorUndo.length === 0;
+  ($("#redo-edit") as HTMLButtonElement).disabled = editorRedo.length === 0;
+}
+
+function rememberEditorState(): void {
+  editorUndo.push([...editorPixels]);
+  if (editorUndo.length > 60) editorUndo.shift();
+  editorRedo = [];
+  updateEditorHistoryButtons();
+}
+
+function editorCellFromEvent(event: PointerEvent): number | null {
+  const target = $("#editor-canvas") as HTMLCanvasElement;
+  const bounds = target.getBoundingClientRect();
+  const x = Math.floor((event.clientX - bounds.left) / bounds.width * 24);
+  const y = Math.floor((event.clientY - bounds.top) / bounds.height * 24);
+  return x >= 0 && x < 24 && y >= 0 && y < 24 ? y * 24 + x : null;
+}
+
+function applyEditorPointer(event: PointerEvent): void {
+  const index = editorCellFromEvent(event);
+  if (index === null) return;
+  if (editorTool === "picker") {
+    selectEditorColor(editorPixels[index]);
+    setEditorTool("brush");
+    return;
+  }
+  if (editorPixels[index] === editorSelectedColor) return;
+  editorPixels[index] = editorSelectedColor;
+  drawEditor();
+}
+
+function openPixelEditor(source: "template" | "conversion"): void {
+  try {
+    const pixels = source === "conversion"
+      ? generatedTemplate?.paletteIndices
+      : currentJson ? templatePaletteIndices(currentJson) : null;
+    if (!pixels) return setMessage("请先导入或生成一个模板。", "error");
+    editorSource = source;
+    editorPixels = [...pixels];
+    editorOriginalPixels = [...pixels];
+    editorUndo = [];
+    editorRedo = [];
+    editorSelectedColor = editorPixels.find((index) => index !== 3) ?? 0;
+    setEditorTool("brush");
+    selectEditorColor(editorSelectedColor);
+    updateEditorHistoryButtons();
+    drawEditor();
+    ($("#pixel-editor") as HTMLDivElement).hidden = false;
+  } catch (error) {
+    setMessage(String(error), "error");
+  }
+}
+
+function closePixelEditor(): void {
+  editorPainting = false;
+  ($("#pixel-editor") as HTMLDivElement).hidden = true;
+}
+
+async function acceptEditedTemplate(saveFile: boolean): Promise<void> {
+  try {
+    const generated = createTemplateFromPaletteIndices(editorPixels);
+    const result = await invoke<TemplateAnalysis>("analyze_template", { json: generated.json });
+    const fileName = editorSource === "conversion" ? `${sourceImageName || "像素画模板"}.json` : `${currentTemplateName || "像素画模板"}.json`;
+    closePixelEditor();
+    if (editorSource === "conversion") closeImageStudio(false);
+    renderAnalysis(fileName, generated.json, result);
+    rememberTemplate(fileName, generated.json);
+    if (saveFile) exportCurrentTemplate();
+    else setMessage(`${fileName} 的精修结果已应用并加入模板库。`, "success");
+  } catch (error) {
+    setMessage(String(error), "error");
+  }
 }
 
 function groupMarkup(group: ColorGroup): string {
@@ -321,6 +662,7 @@ function renderAnalysis(fileName: string, json: string, result: TemplateAnalysis
   $("#execution-detail").textContent = `${result.paintedCells} 个非白格 · ${result.colorCount} 色 · 精确单击模式`;
   primaryImport.disabled = false;
   ($("#export-template") as HTMLButtonElement).disabled = false;
+  ($("#edit-template") as HTMLButtonElement).disabled = false;
   primaryImport.querySelector("b")!.textContent = "READY";
   testButton.disabled = !calibrationReady();
   startButton.disabled = !calibrationReady();
@@ -338,6 +680,12 @@ async function loadTemplate(file: File): Promise<void> {
     rememberTemplate(file.name, json);
   }
   catch (error) { templateStatus.textContent = "模板无效"; templateStatus.className = "status-chip is-error"; setMessage(String(error), "error"); }
+}
+
+async function loadInputFile(file: File): Promise<void> {
+  if (file.name.toLowerCase().endsWith(".json") || file.type === "application/json") await loadTemplate(file);
+  else if (file.type.startsWith("image/")) await openImageStudio(file);
+  else setMessage("请选择 JSON 模板或常见图片文件。", "error");
 }
 
 async function loadLibraryTemplate(name: string, json: string): Promise<void> {
@@ -432,7 +780,9 @@ if ("__TAURI_INTERNALS__" in window) {
   });
 }
 
-$("#choose-file").addEventListener("click", () => fileInput.click());
+$("#choose-file").addEventListener("click", () => { fileInput.accept = "application/json,.json"; fileInput.click(); });
+$("#choose-image").addEventListener("click", () => { fileInput.accept = "image/png,image/jpeg,image/webp,image/gif,image/bmp"; fileInput.click(); });
+$("#edit-template").addEventListener("click", () => openPixelEditor("template"));
 $("#export-template").addEventListener("click", exportCurrentTemplate);
 $("#template-library").addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
@@ -456,11 +806,92 @@ $("#template-library").addEventListener("click", (event) => {
     if (saved) void loadLibraryTemplate(saved.name, saved.json);
   }
 });
-dropZone.addEventListener("click", (event) => { if (event.target !== canvas) fileInput.click(); });
-fileInput.addEventListener("change", () => { const file = fileInput.files?.[0]; if (file) void loadTemplate(file); });
+dropZone.addEventListener("click", (event) => {
+  if (event.target !== canvas) {
+    fileInput.accept = "application/json,.json,image/png,image/jpeg,image/webp,image/gif,image/bmp";
+    fileInput.click();
+  }
+});
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files?.[0];
+  if (file) void loadInputFile(file);
+  fileInput.value = "";
+});
 for (const name of ["dragenter", "dragover"]) dropZone.addEventListener(name, (event) => { event.preventDefault(); dropZone.classList.add("is-dragging"); });
 for (const name of ["dragleave", "drop"]) dropZone.addEventListener(name, (event) => { event.preventDefault(); dropZone.classList.remove("is-dragging"); });
-dropZone.addEventListener("drop", (event) => { const file = event.dataTransfer?.files[0]; if (file) void loadTemplate(file); });
+dropZone.addEventListener("drop", (event) => { const file = event.dataTransfer?.files[0]; if (file) void loadInputFile(file); });
+document.querySelectorAll<HTMLButtonElement>("[data-conversion-preset]").forEach((button) => button.addEventListener("click", () => {
+  const preset = button.dataset.conversionPreset as ConversionPreset;
+  conversionSettings = { ...CONVERSION_PRESETS[preset] };
+  setConversionControls(conversionSettings);
+  document.querySelectorAll<HTMLElement>("[data-conversion-preset]").forEach((item) => item.classList.toggle("is-active", item === button));
+  queueConversionPreview();
+}));
+for (const selector of ["#conversion-algorithm", "#conversion-fit", "#conversion-edge", "#conversion-contrast", "#conversion-saturation", "#conversion-dither"]) {
+  $(selector).addEventListener("input", () => {
+    document.querySelectorAll<HTMLElement>("[data-conversion-preset]").forEach((item) => item.classList.remove("is-active"));
+    updateConversionLabels();
+    queueConversionPreview();
+  });
+}
+$("#close-studio").addEventListener("click", () => closeImageStudio());
+$("#cancel-conversion").addEventListener("click", () => closeImageStudio());
+$("#edit-conversion").addEventListener("click", () => openPixelEditor("conversion"));
+$("#use-conversion").addEventListener("click", () => void acceptGeneratedTemplate(false));
+$("#save-conversion").addEventListener("click", () => void acceptGeneratedTemplate(true));
+$("#image-studio").addEventListener("click", (event) => { if (event.target === $("#image-studio")) closeImageStudio(); });
+$("#editor-palette").addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLElement>("[data-editor-color]");
+  if (button?.dataset.editorColor !== undefined) {
+    selectEditorColor(Number(button.dataset.editorColor));
+    setEditorTool("brush");
+  }
+});
+$("#brush-tool").addEventListener("click", () => setEditorTool("brush"));
+$("#picker-tool").addEventListener("click", () => setEditorTool("picker"));
+$("#undo-edit").addEventListener("click", () => {
+  const previous = editorUndo.pop();
+  if (!previous) return;
+  editorRedo.push([...editorPixels]);
+  editorPixels = previous;
+  drawEditor();
+  updateEditorHistoryButtons();
+});
+$("#redo-edit").addEventListener("click", () => {
+  const next = editorRedo.pop();
+  if (!next) return;
+  editorUndo.push([...editorPixels]);
+  editorPixels = next;
+  drawEditor();
+  updateEditorHistoryButtons();
+});
+$("#reset-edit").addEventListener("click", () => {
+  rememberEditorState();
+  editorPixels = [...editorOriginalPixels];
+  drawEditor();
+  updateEditorHistoryButtons();
+});
+const editorCanvas = $("#editor-canvas") as HTMLCanvasElement;
+editorCanvas.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  if (editorTool === "brush") rememberEditorState();
+  editorPainting = editorTool === "brush";
+  editorCanvas.setPointerCapture(event.pointerId);
+  applyEditorPointer(event);
+});
+editorCanvas.addEventListener("pointermove", (event) => { if (editorPainting) applyEditorPointer(event); });
+editorCanvas.addEventListener("pointerup", () => { editorPainting = false; });
+editorCanvas.addEventListener("pointercancel", () => { editorPainting = false; });
+$("#close-editor").addEventListener("click", closePixelEditor);
+$("#cancel-editor").addEventListener("click", closePixelEditor);
+$("#apply-editor").addEventListener("click", () => void acceptEditedTemplate(false));
+$("#save-editor").addEventListener("click", () => void acceptEditedTemplate(true));
+$("#pixel-editor").addEventListener("click", (event) => { if (event.target === $("#pixel-editor")) closePixelEditor(); });
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!($("#pixel-editor") as HTMLDivElement).hidden) closePixelEditor();
+  else if (!($("#image-studio") as HTMLDivElement).hidden) closeImageStudio();
+});
 document.querySelectorAll<HTMLButtonElement>("[data-step]").forEach((button) => button.addEventListener("click", () => {
   const target = button.dataset.step as Step;
   if (target === "import" || target === "calibrate" || (target === "execute" && analysis && calibrationReady())) setStep(target);
