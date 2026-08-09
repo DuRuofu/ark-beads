@@ -109,6 +109,24 @@ pnpm build:mac
 
 应用基于 Rust、Tauri、原生 TypeScript/CSS 和 Enigo 构建。当前版本不引入 OpenCV，以保持安装包和依赖尽可能精简。
 
+## 下载与发布
+
+GitHub Release 提供免安装版本：
+
+- Windows x64：下载 `windows-x64-portable.zip`，解压后直接运行其中的 `ark-beads.exe`
+- macOS：下载 `macOS-universal-portable.zip`，解压后将 `Ark Beads.app` 放入“应用程序”再打开；同一文件同时支持 Apple Silicon 和 Intel Mac
+
+目前的自动构建产物未使用商业代码签名证书。Windows 可能显示 SmartScreen 提示；macOS 首次打开时可能需要在“隐私与安全性”中手动允许。鼠标控制仍需单独授予辅助功能权限。
+
+维护者发布新版本时，需要先同步修改 `package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 中的版本号，然后推送对应标签：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+标签会触发 GitHub Actions，自动编译、重命名和压缩 Windows/macOS 产物，并创建对应的 GitHub Release。Windows Release 还会附带一个可选的 `setup.exe` 安装版本。
+
 ## 声明与免责
 
 - Ark Beads 是非官方、非商业的开源同人项目，与《明日方舟》及其开发商、发行商不存在隶属、授权、认可或合作关系。

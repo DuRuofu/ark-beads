@@ -1,0 +1,188 @@
+name: Release desktop apps
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-version:
+    name: Check release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: version
+        name: Match tag and application versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          tauri_version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' src-tauri/Cargo.toml | head -n 1)"
+
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like v0.1.0."
+            exit 1
+          fi
+
+          if [[ "$package_version" != "$version" || "$tauri_version" != "$version" || "$cargo_version" != "$version" ]]; then
+            echo "Tag: $version; package.json: $package_version; tauri.conf.json: $tauri_version; Cargo.toml: $cargo_version"
+            echo "Update all application versions before creating the tag."
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows x64
+    needs: check-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build application and NSIS installer
+        run: pnpm tauri build --bundles nsis
+
+      - name: Package portable and installer downloads
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force release-artifacts | Out-Null
+
+          $portable = "src-tauri/target/release/ark-beads.exe"
+          if (-not (Test-Path $portable)) {
+            throw "Portable executable was not generated: $portable"
+          }
+          Compress-Archive -Path $portable -DestinationPath "release-artifacts/Ark-Beads_$env:RELEASE_VERSION_windows-x64-portable.zip"
+
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer was not generated."
+          }
+          Copy-Item $installer.FullName "release-artifacts/Ark-Beads_$env:RELEASE_VERSION_windows-x64-setup.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: release-artifacts/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal
+    needs: check-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build universal application bundle
+        run: pnpm tauri build --target universal-apple-darwin --bundles app
+
+      - name: Sign and package portable download
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          app_path="$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)"
+          if [[ -z "$app_path" ]]; then
+            echo "macOS application bundle was not generated."
+            exit 1
+          fi
+
+          codesign \
+            --force \
+            --deep \
+            --sign - \
+            --identifier com.duruofu.ark-beads \
+            --requirements '=designated => identifier "com.duruofu.ark-beads"' \
+            "$app_path"
+          codesign --verify --deep --strict "$app_path"
+
+          mkdir -p release-artifacts
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app_path" \
+            "release-artifacts/Ark-Beads_${RELEASE_VERSION}_macOS-universal-portable.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: release-artifacts/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - check-version
+      - windows
+      - macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-release"
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create or update release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-artifacts/* \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" release-artifacts/* \
+              --verify-tag \
+              --title "Ark Beads $GITHUB_REF_NAME" \
+              --generate-notes \
+              --repo "$GITHUB_REPOSITORY"
+          fi
