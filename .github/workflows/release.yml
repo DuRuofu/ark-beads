@@ -83,13 +83,13 @@ jobs:
           if (-not (Test-Path $portable)) {
             throw "Portable executable was not generated: $portable"
           }
-          Compress-Archive -Path $portable -DestinationPath "release-artifacts/Ark-Beads_$env:RELEASE_VERSION_windows-x64-portable.zip"
+          Compress-Archive -Path $portable -DestinationPath "release-artifacts/Ark-Beads_$($env:RELEASE_VERSION)_windows-x64-portable.zip"
 
           $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
           if (-not $installer) {
             throw "NSIS installer was not generated."
           }
-          Copy-Item $installer.FullName "release-artifacts/Ark-Beads_$env:RELEASE_VERSION_windows-x64-setup.exe"
+          Copy-Item $installer.FullName "release-artifacts/Ark-Beads_$($env:RELEASE_VERSION)_windows-x64-setup.exe"
 
       - uses: actions/upload-artifact@v4
         with:

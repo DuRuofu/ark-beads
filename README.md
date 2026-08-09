@@ -121,8 +121,8 @@ GitHub Release 提供免安装版本：
 维护者发布新版本时，需要先同步修改 `package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 中的版本号，然后推送对应标签：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 标签会触发 GitHub Actions，自动编译、重命名和压缩 Windows/macOS 产物，并创建对应的 GitHub Release。Windows Release 还会附带一个可选的 `setup.exe` 安装版本。
